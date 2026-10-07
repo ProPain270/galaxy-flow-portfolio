@@ -1,0 +1,11 @@
+<resources>
+    <color name="galaxy_background">#080C13</color>
+    <color name="galaxy_surface">#101722</color>
+    <color name="galaxy_surface_raised">#151E2B</color>
+    <color name="galaxy_text">#F4F7FB</color>
+    <color name="galaxy_muted">#91A0B2</color>
+    <color name="galaxy_blue">#6EA1FF</color>
+    <color name="galaxy_cyan">#78D9FF</color>
+    <color name="galaxy_lime">#C9F36D</color>
+    <color name="galaxy_purple">#9B8CFF</color>
+</resources>
