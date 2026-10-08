@@ -57,3 +57,18 @@ npm test
 | Android device tests | `app/src/androidTest/java/com/galaxyflow/app/WorkspaceDeviceTest.kt` |
 
 See [validation](VALIDATION.md) for observed results and remaining hardware scope. Original project code has no blanket license grant in this snapshot.
+
+
+## Publication guard
+
+Requires Python 3. Install the pre-push guard separately in each clone; Git does not clone local hooks.
+
+```sh
+python3 tools/install_publication_guard.py
+python3 tools/test_public_export.py
+python3 tools/check_public_export.py
+```
+
+The guard checks every reachable commit's author and committer against matching GitHub noreply identities, scans historical file contents and commit messages for common disclosure patterns, and rejects generated/credential files, symlinks, submodules, and unreviewed binaries. Errors identify Git objects without printing suspicious values. The retained Gradle wrapper is allowed only at its reviewed SHA-256; provenance is recorded in `tools/public-export-policy.json`. Gradle distribution downloads also have pinned checksums.
+
+The installer preserves existing hooks and custom hook settings. CI runs the same checks against full history. These checks complement manual review; they are not an exhaustive privacy guarantee. CI checks occur after a push, so use the local hook to catch mistakes before upload. Intentional code contributions should use the contributor's public GitHub handle and corresponding noreply email.

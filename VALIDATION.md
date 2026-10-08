@@ -17,3 +17,8 @@ GitHub Actions runs JavaScript tests plus native unit tests, debug lint, and deb
 Physical foldable/controller behavior, OEM backup compliance, real Calendar-provider interoperability, vendor integrations, release signing, and long-duration qualification remain unverified. Fold signals in the automated suite are injected through AndroidX WindowManager's testing adapter. A Calendar handoff is not proof that the user saved an event. Samsung ecosystem automation is not connected.
 
 Lint warnings include dependency update notices, presentation/localization recommendations, and existing renderer allocation notices. They are recorded rather than hidden behind a baseline.
+
+
+## Publication safeguards
+
+The publication guard's 10 synthetic-history tests pass, including author/committer fallback, secrets deleted from later commits, commit-message disclosures, generated files, private path/address patterns, symlinks, and changed reviewed-binary digests. Both the full public history and source exports pass the guard. Gradle wrapper digests match official release checksums and distribution digests are pinned.

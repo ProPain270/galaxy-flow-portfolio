@@ -1,0 +1,8 @@
+{
+  "allowed_binary_sha256": {
+    "gradle/wrapper/gradle-wrapper.jar": "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
+  },
+  "provenance": {
+    "gradle/wrapper/gradle-wrapper.jar": "https://services.gradle.org/distributions/gradle-8.14.3-wrapper.jar.sha256"
+  }
+}
