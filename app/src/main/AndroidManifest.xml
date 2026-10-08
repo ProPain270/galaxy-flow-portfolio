@@ -1,7 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="Galaxy Flow"
+        android:icon="@drawable/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.GalaxyFlow">
         <activity

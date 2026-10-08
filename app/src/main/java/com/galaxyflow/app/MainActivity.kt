@@ -1,237 +1,304 @@
 package com.galaxyflow.app
 
-import android.app.Activity
+import android.app.AlertDialog
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var store: FlowStore
     private var state = FlowState()
     private var runToken = 0
-    private lateinit var root: FrameLayout
-
+    private var detectedPosture = FoldPosture.COVER
+    private var posturePreview = false
+    private var scroll: ScrollView? = null
     private val bg = Color.rgb(8, 12, 19)
-    private val surface = Color.rgb(16, 23, 34)
-    private val surfaceRaised = Color.rgb(21, 30, 43)
+    private val surface = Color.rgb(21, 30, 43)
     private val textColor = Color.rgb(244, 247, 251)
     private val muted = Color.rgb(145, 160, 178)
-    private val blue = Color.rgb(110, 161, 255)
     private val cyan = Color.rgb(120, 217, 255)
     private val lime = Color.rgb(201, 243, 109)
-    private val purple = Color.rgb(155, 140, 255)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = bg
-        window.navigationBarColor = bg
+        store = FlowStore(this)
+        state = store.load()
+        detectWindow()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                WindowInfoTracker.getOrCreate(this@MainActivity).windowLayoutInfo(this@MainActivity).collect { info ->
+                    val fold = info.displayFeatures.filterIsInstance<FoldingFeature>().firstOrNull()
+                    detectedPosture = when {
+                        isExternalDisplay() -> FoldPosture.DEX
+                        fold?.state == FoldingFeature.State.HALF_OPENED -> FoldPosture.FLEX
+                        fold != null || resources.configuration.screenWidthDp >= 600 -> FoldPosture.OPEN
+                        else -> FoldPosture.COVER
+                    }
+                    if (!posturePreview && state.posture != detectedPosture) {
+                        state = state.copy(posture = detectedPosture)
+                        render()
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
         render()
+    }
+
+    override fun onStop() {
+        runToken++
+        handler.removeCallbacksAndMessages(null)
+        if (state.execution.status in setOf(ExecutionStatus.RUNNING, ExecutionStatus.EVALUATING)) {
+            dispatch(Event.Pause, redraw = false)
+        }
+        super.onStop()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        detectWindow()
+        render()
+    }
+
+    private fun isExternalDisplay(): Boolean = Build.VERSION.SDK_INT >= 30 &&
+        display?.displayId?.let { it != android.view.Display.DEFAULT_DISPLAY } == true
+
+    private fun detectWindow() {
+        detectedPosture = when {
+            isExternalDisplay() -> FoldPosture.DEX
+            resources.configuration.screenWidthDp >= 600 -> FoldPosture.OPEN
+            else -> FoldPosture.COVER
+        }
+        if (!posturePreview) state = state.copy(posture = detectedPosture)
+    }
+
+    private fun dispatch(event: Event, redraw: Boolean = true) {
+        val next = FlowEngine.reduce(state, event)
+        state = if (store.save(next)) next else {
+            FlowEngine.reduce(state, Event.Fail("Local storage could not be saved. Retry before continuing."))
+        }
+        if (redraw) render()
     }
 
     private fun render() {
-        val previousScroll = if (::root.isInitialized) {
-            (root.getChildAt(0) as? ScrollView)?.scrollY ?: 0
-        } else {
-            0
-        }
-        root = FrameLayout(this).apply {
-            setBackgroundColor(bg)
-            setPadding(0, statusBarHeight(), 0, 0)
-        }
-        val scroll = ScrollView(this).apply { isFillViewport = true }
-        val page = column(0)
-        page.addView(topBar())
-        page.addView(content())
-        scroll.addView(page)
-        root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
-        setContentView(root)
-        scroll.post { scroll.scrollTo(0, previousScroll) }
-    }
-
-    private fun topBar(): View = row(16).apply {
-        setPadding(dp(20), dp(17), dp(20), dp(17))
-        addView(TextView(this@MainActivity).apply {
-            text = "◈  Galaxy Flow\n     Make your moment"
-            setTextColor(textColor)
-            textSize = 15f
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(TextView(this@MainActivity).apply { text = "●  Local prototype   DY"; setTextColor(muted); textSize = 11f; gravity = Gravity.CENTER_VERTICAL })
-    }
-
-    private fun content(): View = column(18).apply {
-        setPadding(dp(20), dp(24), dp(20), dp(30))
-        addView(label("ADAPTIVE WORKSPACE", cyan))
-        addView(title("Start Work"))
-        addView(body("Arrive at work. Your Fold sets up the day."))
-        addView(contextCard())
-        addView(sectionTitle("FLOW RAIL", "Then do these things", "${state.steps.size - 1} actions"))
-        addView(flowRail())
-        addView(detailCard())
-        addView(trustCard())
-        addView(actionRow())
-        state.execution.error?.let { addView(errorCard(it)) }
-        addView(stagePanel())
-    }
-
-    private fun contextCard(): View = card(surfaceRaised, 16).apply {
-        val inner = row(12)
-        inner.setPadding(dp(14), dp(14), dp(14), dp(14))
-        inner.addView(TextView(this@MainActivity).apply { text = "⌖"; setTextColor(cyan); textSize = 26f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(36), dp(50)))
-        inner.addView(column(3).apply {
-            addView(label("THIS FLOW STARTS WHEN", muted))
-            addView(TextView(this@MainActivity).apply { text = "you arrive at the office"; setTextColor(textColor); textSize = 15f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
-            addView(body("Weekdays · 8:00–10:00 AM · Work Wi-Fi detected · Fold opened"))
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(inner)
-    }
-
-    private fun flowRail(): View = column(6).apply {
-        state.steps.forEachIndexed { index, step ->
-            val selected = state.selectedStepId == step.id
-            val completed = step.state == "complete"
-            val button = Button(this@MainActivity).apply {
-                text = "${if (completed) "✓" else index + 1}   ${step.group}\n       ${step.title}\n       ${step.detail}${if (step.requiresApproval) "   · Ask first" else ""}"
-                gravity = Gravity.CENTER_VERTICAL or Gravity.START
-                setTextColor(if (selected) textColor else Color.rgb(215, 224, 235))
-                textSize = 12f
-                setPadding(dp(14), dp(9), dp(14), dp(9))
-                background = rounded(if (selected) Color.rgb(25, 42, 72) else Color.TRANSPARENT, 14)
-                setOnClickListener { state = FlowEngine.reduce(state, Event.SelectStep(step.id)); render() }
+        val previousScroll = scroll?.scrollY ?: 0
+        val page = column().apply {
+            setPadding(dp(20), dp(20), dp(20), dp(30))
+            addView(label("GALAXY FLOW · ON-DEVICE WORKSPACE", cyan))
+            addView(body("Start Work", 32f, textColor))
+            addView(body("Your notes and priorities, saved locally. Start when you choose."))
+            addView(workspaceCard())
+            addView(card().apply {
+                addView(label("${state.execution.status.name.replace('_', ' ')} · ${if (state.execution.mode == "device") "LOCAL WORKSPACE" else "PREVIEW"}", lime))
+                addView(body("Manual start · No location or Wi-Fi monitoring"))
+                addView(control("Preview workspace") { startRun(false) })
+                addView(control("Start workspace") { startRun(true) })
+                when (state.execution.status) {
+                    ExecutionStatus.WAITING_APPROVAL -> addView(approvalCard())
+                    ExecutionStatus.PAUSED -> addView(control("Resume interrupted flow") {
+                        dispatch(Event.Resume)
+                        scheduleNext()
+                    })
+                    ExecutionStatus.EVALUATING, ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED -> addView(control("Pause flow") {
+                        cancelRun()
+                        dispatch(Event.Pause)
+                    })
+                    else -> Unit
+                }
+                if (state.execution.status != ExecutionStatus.IDLE) {
+                    addView(control("Undo workspace activation") {
+                        cancelRun()
+                        dispatch(Event.Undo)
+                    })
+                }
+                state.execution.error?.let { message ->
+                    addView(body(message, color = Color.rgb(255, 170, 170)))
+                    addView(control("Dismiss error") { dispatch(Event.DismissError) })
+                }
+            })
+            if (!state.focus) {
+                addView(label("FLOW PLAN", cyan))
+                state.steps.forEach { step ->
+                    addView(card().apply {
+                        addView(body("${step.title} · ${step.state}", 14f, textColor))
+                        addView(body(step.detail))
+                    })
+                }
             }
-            addView(button, LinearLayout.LayoutParams(-1, dp(88)))
+            addView(trustCard())
+            addView(stagePanel())
+        }
+        val nextScroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(bg)
+            setOnApplyWindowInsetsListener { view, insets ->
+                val bars = WindowInsetsCompat.toWindowInsetsCompat(insets).getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+            addView(page)
+        }
+        scroll = nextScroll
+        setContentView(nextScroll)
+        nextScroll.post { nextScroll.scrollTo(0, previousScroll) }
+    }
+
+    private fun workspaceCard(): View = card().apply {
+        addView(label(if (state.workspaceActive) "YOUR ACTIVE WORKSPACE" else "YOUR SAVED WORKSPACE", cyan))
+        addView(body("Notes: ${state.notes.ifBlank { "No notes saved yet" }}"))
+        addView(body("Priorities: ${state.priorities.ifBlank { "No priorities saved yet" }}"))
+        addView(control("Edit notes and priorities") { editWorkspace() })
+        if (state.focus) {
+            addView(control("Leave app focus") { dispatch(Event.LeaveFocus) })
         }
     }
 
-    private fun detailCard(): View {
-        val selected = state.steps.firstOrNull { it.id == state.selectedStepId } ?: state.steps.first()
-        return card(surfaceRaised, 14).apply {
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            addView(column(3).apply {
-                addView(label("${selected.group} · ${selected.risk} RISK", purple))
-                addView(TextView(this@MainActivity).apply { text = selected.title; setTextColor(textColor); textSize = 14f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
-                addView(body(selected.detail))
-            })
+    private fun editWorkspace() {
+        val notes = EditText(this).apply {
+            hint = "Notes"
+            setText(state.notes)
+            minLines = 3
+            filters = arrayOf(android.text.InputFilter.LengthFilter(20_000))
+        }
+        val priorities = EditText(this).apply {
+            hint = "Priorities"
+            setText(state.priorities)
+            minLines = 2
+            filters = arrayOf(android.text.InputFilter.LengthFilter(10_000))
+        }
+        val fields = column().apply {
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            addView(notes)
+            addView(priorities)
+        }
+        AlertDialog.Builder(this).setTitle("Local workspace").setView(fields)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                dispatch(Event.SaveWorkspace(notes.text.toString(), priorities.text.toString()))
+            }.show()
+    }
+
+    private fun approvalCard(): View = column().apply {
+        addView(label("YOUR APPROVAL IS REQUIRED", lime))
+        addView(body("Open a generic work reminder draft in Calendar? No notes are shared. You decide whether to save in Calendar. Undo cannot remove a reminder you save there."))
+        addView(control("Open Calendar draft") {
+            if (CalendarDraft.open(this@MainActivity)) {
+                dispatch(Event.ApproveReminder)
+                scheduleNext()
+            } else {
+                dispatch(Event.Fail("No Calendar app could open the draft. Dismiss, resume, and skip this optional step."))
+            }
+        })
+        addView(control("Skip reminder") {
+            dispatch(Event.SkipReminder)
+            scheduleNext()
+        })
+    }
+
+    private fun trustCard(): View = card().apply {
+        addView(label("LOCAL DATA AND EXPLICIT HANDOFF", lime))
+        addView(body("Notes stay in this app. Calendar opens only after approval."))
+        addView(control(if (state.trustOpen) "Hide details" else "Show details") { dispatch(Event.ToggleTrust) })
+        if (state.trustOpen) {
+            addView(body("Private local storage; cloud backup and device transfer are excluded. Focus hides this app’s planning rail only. Calendar receives a generic draft title and time after approval. Saving or cancelling happens in Calendar. No network, location, Calendar access, or notification policy permissions."))
         }
     }
 
-    private fun trustCard(): View = card(Color.rgb(19, 32, 24), 14).apply {
-        val inner = column(6)
-        inner.setPadding(dp(14), dp(12), dp(14), dp(12))
-        inner.addView(row(10).apply {
-            addView(TextView(this@MainActivity).apply { text = "✓"; setTextColor(lime); textSize = 19f })
-            addView(column(2).apply {
-                addView(TextView(this@MainActivity).apply { text = "Protected by design"; setTextColor(lime); textSize = 12f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
-                addView(body("Uses Wi-Fi, calendar, tasks, and focus settings"))
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(Button(this@MainActivity).apply { text = if (state.trustOpen) "Hide" else "Details"; setTextColor(lime); textSize = 10f; background = transparent(); setOnClickListener { state = FlowEngine.reduce(state, Event.ToggleTrust); render() } })
-        })
-        if (state.trustOpen) inner.addView(body("Can use: Work Wi-Fi · Calendar · Tasks · Focus\nAlways asks: messages · file changes · sharing · purchases"))
-        addView(inner)
-    }
-
-    private fun actionRow(): View = row(10).apply {
-        setPadding(0, dp(14), 0, 0)
-        addView(Button(this@MainActivity).apply {
-            text = "▶  Preview workspace"
-            setTextColor(Color.WHITE)
-            background = rounded(blue, 12)
-            setOnClickListener { startRun(false) }
-        }, LinearLayout.LayoutParams(0, dp(50), 1f))
-        addView(Button(this@MainActivity).apply {
-            text = "Run on Fold"
-            setTextColor(lime)
-            background = rounded(Color.rgb(28, 43, 25), 12)
-            setOnClickListener { startRun(true) }
-        }, LinearLayout.LayoutParams(0, dp(50), 1f))
-    }
-
-    private fun stagePanel(): View = card(Color.rgb(13, 20, 30), 18).apply {
-        val panel = column(10)
-        panel.setPadding(dp(15), dp(16), dp(15), dp(16))
-        panel.addView(row(8).apply {
-            addView(column(2).apply { addView(label("STAGE PREVIEW", cyan)); addView(TextView(this@MainActivity).apply { text = postureLabel(); setTextColor(textColor); textSize = 21f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) }) }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(label(if (state.execution.mode == "live") "LIVE SIMULATION" else "PREVIEW ONLY", blue))
-        })
-        val tabs = HorizontalScrollView(this@MainActivity).apply { isHorizontalScrollBarEnabled = false }
-        val tabRow = row(5)
-        FoldPosture.values().forEach { posture -> tabRow.addView(Button(this@MainActivity).apply { text = posture.label; textSize = 11f; setTextColor(if (posture == state.posture) textColor else muted); background = rounded(if (posture == state.posture) Color.rgb(35, 57, 95) else surfaceRaised, 10); setPadding(0, 0, 0, 0); setOnClickListener { state = FlowEngine.reduce(state, Event.SelectPosture(posture)); render() } }, LinearLayout.LayoutParams(0, dp(45), 1f)) }
-        tabs.addView(tabRow)
-        panel.addView(tabs)
-        val stage = FoldStageView(this@MainActivity).apply { posture = state.posture; active = state.execution.capsule != null }
-        panel.addView(stage, LinearLayout.LayoutParams(-1, dp(280)))
-        panel.addView(stageResult())
-        if (state.execution.capsule != null) panel.addView(capsule())
-        panel.addView(body(if (state.execution.mode == "live") "Simulation only · no device settings changed" else "Preview only · nothing changes on your device"))
-        addView(panel)
-    }
-
-    private fun stageResult(): View = card(surfaceRaised, 12).apply {
-        setPadding(dp(12), dp(10), dp(12), dp(10))
-        addView(column(3).apply {
-            addView(TextView(this@MainActivity).apply { text = if (state.execution.status == ExecutionStatus.COMPLETED) if (state.execution.mode == "live") "Work stage is active" else "Rehearsal complete" else "Your Fold will be ready with"; setTextColor(textColor); textSize = 12f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
-            addView(body("Calendar + Notes · Priorities visible · Work focus prepared"))
-        })
-    }
-
-    private fun capsule(): View = card(Color.rgb(24, 35, 24), 12).apply {
-        setPadding(dp(12), dp(10), dp(12), dp(10))
-        addView(column(4).apply {
-            addView(label("●  ACTIVE SCENE CAPSULE", lime))
-            addView(TextView(this@MainActivity).apply { text = "Start Work"; setTextColor(textColor); textSize = 14f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) })
-            addView(body("Calendar · Notes · Work focus"))
-            addView(row(8).apply {
-                val paused = state.execution.status == ExecutionStatus.PAUSED
-                addView(Button(this@MainActivity).apply { text = if (paused) "Resume" else "Pause"; setTextColor(lime); textSize = 10f; background = transparent(); setOnClickListener { state = FlowEngine.reduce(state, if (paused) Event.Resume else Event.Pause); render() } })
-                addView(Button(this@MainActivity).apply { text = "Undo"; setTextColor(lime); textSize = 10f; background = transparent(); setOnClickListener { state = FlowEngine.reduce(state, Event.Undo); render() } })
+    private fun stagePanel(): View = card().apply {
+        addView(label(if (posturePreview) "LAYOUT PREVIEW" else "OBSERVED WINDOW", cyan))
+        addView(body(state.posture.label, 20f, textColor))
+        addView(body("Window/fold signals describe this Android window. External display does not establish Samsung DeX. The drawing below is illustrative."))
+        FoldPosture.entries.forEach { posture ->
+            addView(control("Preview ${posture.label}") {
+                posturePreview = true
+                dispatch(Event.SelectPosture(posture))
             })
+        }
+        addView(control("Use observed window") {
+            posturePreview = false
+            state = state.copy(posture = detectedPosture)
+            render()
         })
+        addView(FoldStageView(this@MainActivity).apply {
+            posture = state.posture
+            active = state.workspaceActive
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)))
     }
 
-    private fun errorCard(message: String): View = card(Color.rgb(55, 27, 31), 12).apply { setPadding(dp(12), dp(10), dp(12), dp(10)); addView(row(8).apply { addView(body("Flow paused safely · $message"), LinearLayout.LayoutParams(0, -2, 1f)); addView(Button(this@MainActivity).apply { text = "Dismiss"; setTextColor(Color.rgb(255, 170, 170)); background = transparent(); setOnClickListener { state = FlowEngine.reduce(state, Event.DismissError); render() } }) }) }
+    private fun cancelRun() {
+        runToken++
+        handler.removeCallbacksAndMessages(null)
+    }
 
-    private fun startRun(live: Boolean) {
-        runToken += 1
+    private fun startRun(device: Boolean) {
+        cancelRun()
+        dispatch(if (device) Event.StartWorkspace else Event.StartPreview)
+        scheduleNext()
+    }
+
+    private fun scheduleNext() {
+        if (state.execution.status !in setOf(ExecutionStatus.EVALUATING, ExecutionStatus.RUNNING)) return
         val token = runToken
-        state = FlowEngine.reduce(state, if (live) Event.StartLive else Event.StartPreview)
-        render()
-        repeat(state.steps.size + 1) { index ->
-            handler.postDelayed({ if (token == runToken) { state = FlowEngine.reduce(state, Event.Advance); render() } }, (index + 1) * 550L)
+        handler.postDelayed({
+            if (token == runToken && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                dispatch(Event.Advance)
+                scheduleNext()
+            }
+        }, 550L)
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    private fun card() = column().apply {
+        setPadding(dp(14), dp(12), dp(14), dp(12))
+        background = GradientDrawable().apply {
+            setColor(surface)
+            cornerRadius = dp(14).toFloat()
+        }
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(12)
+            bottomMargin = dp(12)
         }
     }
-
-    private fun postureLabel() = when (state.posture) {
-        FoldPosture.COVER -> "Cover screen"
-        FoldPosture.OPEN -> "Inner screen"
-        FoldPosture.FLEX -> "Flex mode"
-        FoldPosture.DEX -> "DeX display"
+    private fun label(value: String, color: Int) = body(value, 11f, color).apply {
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
     }
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-    private fun statusBarHeight(): Int {
-        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (id > 0) resources.getDimensionPixelSize(id) else dp(24)
+    private fun body(value: String, size: Float = 13f, color: Int = muted) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        setPadding(0, dp(6), 0, dp(6))
     }
-    private fun column(spacing: Int) = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(spacing), 0, dp(spacing)) }
-    private fun row(spacing: Int) = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(spacing), 0, dp(spacing), 0) }
-    private fun label(value: String, color: Int) = TextView(this).apply { text = value; setTextColor(color); textSize = 10f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) }
-    private fun title(value: String) = TextView(this).apply { text = value; setTextColor(textColor); textSize = 38f; setTypeface(Typeface.DEFAULT, Typeface.BOLD); setPadding(0, dp(10), 0, 0) }
-    private fun body(value: String) = TextView(this).apply { text = value; setTextColor(muted); textSize = 11f; setPadding(0, dp(3), 0, dp(3)) }
-    private fun sectionTitle(kicker: String, heading: String, count: String) = row(0).apply { setPadding(0, dp(25), 0, dp(10)); addView(column(2).apply { addView(label(kicker, muted)); addView(TextView(this@MainActivity).apply { text = heading; setTextColor(textColor); textSize = 18f; setTypeface(Typeface.DEFAULT, Typeface.BOLD) }) }, LinearLayout.LayoutParams(0, -2, 1f)); addView(label(count, muted)) }
-    private fun card(color: Int, radius: Int) = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(color, radius); setPadding(0, 0, 0, 0); val params = LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(12); layoutParams = params }
-    private fun rounded(color: Int, radius: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
-    private fun transparent() = GradientDrawable().apply { setColor(Color.TRANSPARENT) }
+    private fun control(title: String, action: () -> Unit) = Button(this).apply {
+        text = title
+        textSize = 12f
+        setTextColor(cyan)
+        setOnClickListener { action() }
+    }
 }

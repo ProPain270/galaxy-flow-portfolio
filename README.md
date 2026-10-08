@@ -1,17 +1,20 @@
 # Galaxy Flow
 
-A local-first workflow rehearsal prototype with a browser interface and a native Kotlin Android app. It models how a workflow moves through preview, execution, pause, resume, recovery, and undo while adapting its visual stage to foldable-device postures.
+A local Android workspace with saved notes, priorities, app-level focus, observed window/fold information, and an approval-gated Calendar draft handoff. A companion browser app rehearses illustrative workflows without accessing device services.
 
 ## Engineering highlights
 
-- Pure JavaScript domain state machine with Node's built-in test runner.
-- Native Kotlin lifecycle model and Android interface.
-- Responsive browser UI and native posture preview renderer.
-- Explicit action boundaries, simulated execution, and recoverable failure states.
+- Pure Kotlin execution model with pause, explicit resume, approval, skip, recovery, and undo.
+- Private local persistence; interrupted runs pause on restoration. Saved notes survive undo.
+- Lifecycle-aware execution stops in the background and refreshes controls on return.
+- AndroidX WindowManager reports the current window's fold features; manual posture tabs are clearly labeled previews.
+- Standard Android Calendar insertion intent opens a generic draft only after approval. The user decides whether to save it in Calendar. The app records the handoff, not a saved event.
+- No network, location, Calendar access, or notification policy permissions. Cloud backup and device transfer exclude local workspace data.
+- Separate JavaScript rehearsal state machine and responsive browser interface.
 
-The browser and native apps are prototypes. Device execution, Samsung DeX, and ecosystem integrations are simulated rather than connected to vendor services.
+App focus hides Galaxy Flow's planning rail; it does not alter system notifications. Undo restores the prior local workspace/focus flags and keeps notes. A reminder saved in Calendar must be managed in Calendar. Samsung DeX, SmartThings, Watch, Buds, and vendor automation are not integrated. External display detection does not establish DeX.
 
-## Run the browser app
+## Run the browser rehearsal
 
 Requires Python 3. No dependency install is needed.
 
@@ -19,9 +22,20 @@ Requires Python 3. No dependency install is needed.
 python3 -m http.server 4174
 ```
 
-Open `http://localhost:4174`.
+Open `http://localhost:4174`. Device visuals, office context, and service connections in the browser are mock data.
 
-## Run tests
+## Build and test Android
+
+Install JDK 17 and Android SDK 36; set `JAVA_HOME` and `ANDROID_HOME` for your system.
+
+```sh
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The connected tests require a disposable emulator or test device: they clear this app's local workspace state. They cover persistence, interrupted execution, restored approval, corrupted storage, Calendar intent boundaries, Activity recreation, and undo. The debug APK is under `app/build/outputs/apk/debug/`. Release distribution requires your own signing configuration.
+
+## Browser tests
 
 Requires Node.js with its built-in test runner.
 
@@ -29,29 +43,17 @@ Requires Node.js with its built-in test runner.
 npm test
 ```
 
-Tests exercise flow creation, posture selection, preview completion, live capsules, pause/resume, undo, and failure handling.
-
-## Build Android
-
-Install JDK 17 and Android SDK 36, and set `JAVA_HOME` and `ANDROID_HOME` for your system.
-
-```sh
-./gradlew :app:assembleDebug
-```
-
-The APK is generated under `app/build/outputs/apk/debug/`. Release distribution requires your own signing configuration.
-
 ## Code map
 
 | Component | Location |
 | --- | --- |
-| Browser domain model | `src/flow-engine.js` |
+| Browser rehearsal model | `src/flow-engine.js` |
 | Browser UI | `src/app.js`, `styles.css` |
-| Domain tests | `test/flow-engine.test.js` |
-| Native interface | `app/src/main/java/com/galaxyflow/app/MainActivity.kt` |
-| Native lifecycle | `app/src/main/java/com/galaxyflow/app/FlowEngine.kt` |
-| Posture renderer | `app/src/main/java/com/galaxyflow/app/FoldStageView.kt` |
+| Native interface and window adapter | `app/src/main/java/com/galaxyflow/app/MainActivity.kt` |
+| Native execution model | `app/src/main/java/com/galaxyflow/app/FlowEngine.kt` |
+| Private persistence | `app/src/main/java/com/galaxyflow/app/FlowStore.kt` |
+| Calendar handoff adapter | `app/src/main/java/com/galaxyflow/app/CalendarDraft.kt` |
+| Native unit tests | `app/src/test/java/com/galaxyflow/app/FlowEngineTest.kt` |
+| Android device tests | `app/src/androidTest/java/com/galaxyflow/app/WorkspaceDeviceTest.kt` |
 
-## Status
-
-Future work includes actual fold posture adapters, persistence, and vendor integrations. This snapshot does not claim validated hardware automation. Original project code has no blanket license grant in this snapshot.
+See [validation](VALIDATION.md) for observed results and remaining hardware scope. Original project code has no blanket license grant in this snapshot.

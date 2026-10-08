@@ -72,9 +72,9 @@ class FoldStageView(context: Context) : View(context) {
         canvas.drawText(if (purple) "WORKSPACE LINK" else "NEXT UP", card.left + 10f, card.top + 20f, textPaint)
         textPaint.color = Color.rgb(29, 51, 77)
         textPaint.textSize = 12f
-        canvas.drawText(if (purple) "Calendar + Notes connected" else "Client planning", card.left + 10f, card.top + 39f, textPaint)
+        canvas.drawText(if (purple) "Workspace illustration" else "Client planning", card.left + 10f, card.top + 39f, textPaint)
         textPaint.color = Color.rgb(111, 132, 153)
         textPaint.textSize = 9f
-        canvas.drawText(if (purple) "Opened by Galaxy Flow" else "10:00 AM · 45 min", card.left + 10f, card.top + 53f, textPaint)
+        canvas.drawText(if (purple) "Sample layout only" else "10:00 AM · 45 min", card.left + 10f, card.top + 53f, textPaint)
     }
 }
